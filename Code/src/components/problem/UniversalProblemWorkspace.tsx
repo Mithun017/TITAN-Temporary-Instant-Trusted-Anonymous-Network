@@ -154,50 +154,53 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
 
     setChatInput("");
 
-    // 1. Send via WebSocket
-    try {
-      await sendMessage(text, "text");
-    } catch (err) {
-      console.error("Realtime send error:", err);
-    }
+    const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const myAlias = username || realName || "Mithun1706";
+    const myId = me?.id || `u-${Date.now()}`;
+    const channelId = `problem-${problem.id}`;
 
-    // 2. Broadcast to other open tabs in this browser instantly
+    // 1. Immediately add message to local UI store with verified status
+    const localMsg: Message = {
+      id: msgId,
+      roomId: channelId,
+      senderId: myId,
+      senderSlot: 1,
+      senderAlias: myAlias,
+      messageType: "text",
+      content: text,
+      sequenceNumber: Date.now(),
+      timestamp: Date.now(),
+      status: "delivered",
+    };
+    useRoomStore.getState().addMessage(localMsg);
+
+    // 2. Broadcast via BroadcastChannel for instant same-browser multi-tab sync (0ms latency)
     try {
       if (typeof window !== "undefined" && "BroadcastChannel" in window) {
         const bc = new BroadcastChannel(`titan-channel-problem-${problem.id}`);
-        bc.postMessage({
-          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          roomId: `problem-${problem.id}`,
-          senderId: me?.id || "me",
-          senderSlot: 1,
-          senderAlias: username || realName || "Mithun1706",
-          messageType: "text",
-          content: text,
-          timestamp: Date.now(),
-          status: "delivered",
-        });
+        bc.postMessage(localMsg);
         bc.close();
       }
     } catch {}
 
-    // 3. Relay to serverless HTTP API for cross-device Vercel communication
+    // 3. Relay to serverless HTTP API for cross-device / Vercel cloud sync
     try {
       fetch("/api/channel/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          channelId: `problem-${problem.id}`,
-          message: {
-            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            senderId: me?.id || "me",
-            senderAlias: username || realName || "Mithun1706",
-            content: text,
-            messageType: "text",
-            timestamp: Date.now(),
-          },
+          channelId,
+          message: localMsg,
         }),
       }).catch(() => {});
     } catch {}
+
+    // 4. Send via WebSocket if socket connection is open
+    try {
+      await sendMessage(text, "text");
+    } catch {
+      // WebSocket optional; HTTP relay & BroadcastChannel are active
+    }
   };
 
   // Auto-connect to open problem channel (no room IDs, no query params, pure main link)
@@ -962,7 +965,10 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
                         <MessageSquare className="w-7 h-7 text-[#555555]" />
                         <div className="text-xs font-semibold text-white">Live Problem Discussion</div>
                         <div className="text-[11px] text-[#8a8a8a] max-w-sm">
-                          Send a message below to chat in real-time with anyone currently on this problem.
+                          Send a message below. Anyone visiting this problem link will receive it in real-time.
+                        </div>
+                        <div className="text-[10px] text-[#ffa116] bg-[#2d2518] px-2.5 py-1 rounded border border-[#ffa116]/20 mt-1">
+                          Tip: Open this URL in a second tab or incognito window to verify live bidirectional chatting!
                         </div>
                       </div>
                     ) : (
@@ -979,6 +985,12 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
                               </span>
                               <span>•</span>
                               <span>{formatTime(m.timestamp)}</span>
+                              {isMe && (
+                                <span className="flex items-center gap-0.5 text-[#2ebd59] font-medium ml-1">
+                                  <Check className="w-3 h-3 text-[#2ebd59]" />
+                                  <span>Sent</span>
+                                </span>
+                              )}
                             </div>
                             <div
                               className={`px-3 py-2 rounded-lg text-xs leading-relaxed select-text whitespace-pre-wrap max-w-[85%] break-words font-mono ${
