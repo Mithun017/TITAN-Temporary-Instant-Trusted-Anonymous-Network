@@ -1,3 +1,7 @@
+# Documentation directory
+Doc/
+Doc
+
 # Dependencies
 node_modules/
 Code/node_modules/
