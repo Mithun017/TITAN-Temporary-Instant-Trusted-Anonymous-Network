@@ -49,13 +49,9 @@ app.prepare().then(() => {
   });
 
   wss.on("connection", (ws, req, query) => {
-    const roomId = query?.roomId;
-    const participantId = query?.participantId;
-
-    if (!roomId || !participantId) {
-      ws.close(4003, "Missing roomId or participantId");
-      return;
-    }
+    const roomId = query?.roomId || "problem-7";
+    const participantId = query?.participantId || `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const username = query?.username || "Anonymous";
 
     const rooms = global.__titan_rooms;
     if (!rooms) {
@@ -63,27 +59,44 @@ app.prepare().then(() => {
       return;
     }
 
-    const session = rooms.get(roomId);
+    let session = rooms.get(roomId);
     if (!session) {
-      ws.close(4004, "Room Not Found or Expired");
-      return;
+      session = {
+        room: {
+          roomId,
+          roomCode: roomId.toUpperCase(),
+          salt: "leetcode-channel-salt-v1",
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 86400000 * 365,
+          status: "ACTIVE",
+          participants: [],
+          maxParticipants: 10000,
+        },
+        passphraseHash: "open-channel-hash",
+        sockets: new Map(),
+        sequence: 0,
+      };
+      rooms.set(roomId, session);
     }
 
-    if (session.room.expiresAt <= Date.now()) {
-      ws.close(4004, "Room Expired");
-      return;
-    }
-
-    // Verify participant is part of room
-    const participant = session.room.participants.find((p) => p.id === participantId);
+    // Register active participant
+    let participant = session.room.participants.find((p) => p.id === participantId);
     if (!participant) {
-      ws.close(4003, "Participant Not Authorized");
-      return;
+      participant = {
+        id: participantId,
+        alias: username,
+        slot: session.room.participants.length + 1,
+        isConnected: true,
+        joinedAt: Date.now(),
+        lastActiveAt: Date.now(),
+      };
+      session.room.participants.push(participant);
+    } else {
+      participant.alias = username;
+      participant.isConnected = true;
+      participant.lastActiveAt = Date.now();
     }
 
-    // Register active socket
-    participant.isConnected = true;
-    participant.lastActiveAt = Date.now();
     session.sockets.set(participantId, ws);
 
     // Send connection.ready
@@ -94,7 +107,7 @@ app.prepare().then(() => {
         type: "connection.ready",
         roomId,
         sentAt: Date.now(),
-        payload: { participantId, slot: participant.slot },
+        payload: { participantId, slot: participant.slot, username },
       })
     );
 
@@ -184,6 +197,7 @@ app.prepare().then(() => {
                     senderId: participantId,
                     payload: {
                       ...data.payload,
+                      senderAlias: participant.alias || username || "Peer",
                       sequenceNumber: seq,
                     },
                   })

@@ -36,7 +36,7 @@ export function useRealtime() {
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws?roomId=${encodeURIComponent(room.roomId)}&participantId=${encodeURIComponent(me.id)}`;
+    const wsUrl = `${protocol}//${host}/ws?roomId=${encodeURIComponent(room.roomId)}&participantId=${encodeURIComponent(me.id)}&username=${encodeURIComponent(me.alias || "Anonymous")}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
