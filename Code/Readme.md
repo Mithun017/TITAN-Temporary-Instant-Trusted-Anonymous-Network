@@ -1,147 +1,132 @@
-# TITAN — Temporary Instant Trusted Anonymous Network
+# TITAN — Code Architecture & Implementation Guide
 
-> **Connect privately. Chat freely. Leave no trace.**
+> **Live Deployment:** [Problems - LeetCode](https://leetcodecom.vercel.app/)
 
-TITAN is a temporary, private, two-person communication and file-sharing workspace disguised within a high-density, LeetCode-inspired coding platform.
-
-Rather than looking like a conventional messaging app, the entire product is presented as a developer practice platform where **Problem 7 ("7. Private Communication")** functions as the secure two-person communication channel, and **Contest** serves as the temporary encrypted attachment exchange area.
+TITAN is a dual-function system pairing a pixel-perfect [LeetCode](https://leetcodecom.vercel.app/) clone with an ephemeral, zero-knowledge, end-to-end encrypted peer chat tunnel.
 
 ---
 
-## Key Architectural Principles
+## 🌟 Production Deployment
 
-1. **Strict Two-Person Pair Constraint:** Every room admits strictly up to two authenticated participants (atomic backend validation). Any attempt by a third client to enter is instantly rejected.
-2. **Zero Permanent Server-Side Chat History:** The backend acts strictly as an in-memory, volatile ciphertext relay. Plaintext messages and image contents are never written to disk, database, or server logs.
-3. **End-to-End Authenticated Encryption (AES-256-GCM):** Plaintext messages and attachments are encrypted directly in the browser via the Web Crypto API before leaving the client device. Keys are derived from a shared secret passphrase + room salt using PBKDF2 with SHA-256 (100,000 iterations).
-4. **Safety Fingerprints:** A 16-digit human-verifiable security fingerprint allows both peers to verify out-of-band that they share the exact same cryptographic key without exposing the key material.
-5. **LeetCode-Inspired Design System:** One single dark theme across the entire application:
-   - Deep canvas (`#1a1a1a`), raised card panels (`#242424`), subtle borders (`#333333`)
-   - LeetCode orange primary accent (`#ffa116`) and status indicators (`#2cbb5d`, `#ffc01e`, `#ff375f`)
-   - Monospace typography for test cases, code snippets, and session tokens
-6. **Messages as Test Cases:** Chronological conversation stream formatted as testcase runs (`Case 1`, `Case 2`, etc.) with support for plain text, syntax-highlighted code snippets, and structured input/output parameters.
-7. **Threaded Replies:** Responses reference specific parent test-case IDs and remain attached to their originating items.
-8. **Contest Ephemeral File Exchange:** Drag-and-drop client-side encrypted image sharing (PNG, JPEG, WebP up to 5MB) with automatic lifecycle destruction.
+Access the deployed application:
+👉 **[Problems - LeetCode](https://leetcodecom.vercel.app/)**
 
 ---
 
-## Directory Structure
+## 🔑 Key Features & Enhancements
+
+### 1. Direct-Link Chat (No Room IDs, No Passphrases)
+- Users can initiate or join encrypted peer sessions instantly via a direct link (`/problems/7?room=TITAN-XXXX-YYYY`).
+- No modal or password prompt interrupts the user.
+- The AES-256-GCM encryption key is derived automatically upon joining.
+
+### 2. Built-in Console Chat Interface
+- Integrated directly into the problem console drawer alongside the standard LeetCode tabs:
+  - **`Testcase`**: Edit problem inputs or inject disguised signals.
+  - **`Test Result`**: Output console showing runtime metrics and `Runtime Error` stealth view.
+  - **`Chat 💬`**: Full real-time message stream with sent/delivered status, live typing indicator (`Running test...`), timestamping, and instant disguise mode.
+
+### 3. Pixel-Perfect LeetCode Design System
+- Dark mode palette: `#1a1a1a` canvas, `#222222` panels, `#282828` elevated cards, `#ffa116` LeetCode gold.
+- **Problem 7 (7. Reverse Integer):** Replicates the authentic LeetCode interface and stealth `Runtime Error` screen (`IndentationError: expected an indented block after function definition on line 60`).
+- **Problem 1 (1. Two Sum):** Starter code matching the optimal hash map solution, split `nums =` and `target =` input cards, and `Accepted (0 ms)` test results.
+- **Problem 1267 (1267. Count Servers that Communicate):** Complete solution with retro CRT server network illustrations.
+
+### 4. Dynamic Profile Page (`/u/[username]`)
+- Route: `/u/Mithun1706`
+- **Guardian Contest Rating:** Graph peaking at **`2,308`** (`Top 0.52%`, Global Rank `4,390/891,547`).
+- **Solved Metrics:** Donut chart (**`77.29% Acceptance`**, `1157 Problems Solved`: `312 Easy`, `635 Medium`, `210 Hard`).
+- **Heatmap:** 52-week green activity grid (**`474 submissions in past year`**, `332 active days`, `streak 41`).
+
+---
+
+## 🛡️ Cryptographic Architecture
 
 ```text
-Code/
-├── public/                 # Static brand assets
-├── src/
-│   ├── app/
-│   │   ├── layout.tsx      # Root HTML layout with dark theme
-│   │   ├── globals.css     # LeetCode dark tokens & custom scrollbars
-│   │   ├── page.tsx        # Home route (Problem Catalog)
-│   │   ├── problems/
-│   │   │   ├── page.tsx    # Problem Catalog
-│   │   │   └── 7/page.tsx  # Problem 7 (Private Communication Workspace)
-│   │   ├── contest/
-│   │   │   └── page.tsx    # Contest (Ephemeral Image Sharing)
-│   │   └── api/
-│   │       ├── health/     # Health check endpoint
-│   │       ├── rooms/      # Room creation API
-│   │       └── rooms/join/ # Atomic room join API
-│   ├── components/
-│   │   ├── shell/          # AppShell, TopBar navigation
-│   │   ├── problem/        # ProblemCatalog, ProblemWorkspace (Problem 7)
-│   │   ├── contest/        # ContestView, file uploader, gallery
-│   │   └── modals/         # JoinCreateModal, SettingsModal, PrivacyModal
-│   ├── hooks/
-│   │   └── useRealtime.ts  # WebSocket client with heartbeat & reconnect
-│   ├── lib/
-│   │   ├── crypto.ts       # Web Crypto API: PBKDF2 + AES-256-GCM
-│   │   ├── db.ts           # IndexedDB helper for local drafts/prefs
-│   │   └── utils.ts        # Formatting & tailwind-merge helper
-│   ├── schemas/            # Zod runtime validation schemas
-│   ├── server/
-│   │   └── roomManager.ts  # Atomic room coordination & TTL cleaner
-│   ├── stores/
-│   │   └── roomStore.ts    # Zustand store for room, messages, crypto keys
-│   └── types/              # TypeScript event & data contracts
-├── tests/                  # Unit and integration test suite
-├── server.js               # Unified Next.js + WebSocket relay server
-├── package.json
-└── tsconfig.json
+[Plaintext Message]
+         │
+         ▼
+[Web Crypto API: PBKDF2 (SHA-256, 100,000 iter)] ──> [AES-256-GCM Key]
+         │
+         ▼
+[AES-256-GCM Encryption (Unique 96-bit IV)]
+         │
+         ▼
+[Base64 Encrypted Envelope] ──> [WebSocket Transport (/ws)] ──> [Peer Client]
+                                                                     │
+                                                                     ▼
+                                                      [AES-256-GCM Decryption]
+                                                                     │
+                                                                     ▼
+                                                            [Plaintext Display]
 ```
 
 ---
 
-## Getting Started
+## 📁 Source Code Organization
 
-### Prerequisites
-- Node.js 18+ (tested on Node.js v24)
-- npm or pnpm
+```text
+src/
+├── app/
+│   ├── layout.tsx                     # Global HTML layout with LeetCode theme
+│   ├── globals.css                    # Tailwind CSS custom styles & scrollbars
+│   ├── page.tsx                       # Problem Catalog
+│   ├── problems/
+│   │   ├── page.tsx                   # Problem Catalog route
+│   │   └── [id]/page.tsx              # Universal workspace router (1, 7, 1267...)
+│   ├── problemset/                    # LeetCode problemset route alias
+│   ├── u/[username]/                  # Dynamic user profile page
+│   ├── contest/                       # Ephemeral attachment exchange
+│   └── api/
+│       ├── rooms/direct/              # Instant direct-link join endpoint
+│       ├── rooms/                     # Standard room creation endpoint
+│       ├── rooms/join/                # Passphrase-validated room join endpoint
+│       └── health/                    # System health endpoint
+├── components/
+│   ├── problem/
+│   │   ├── UniversalProblemWorkspace.tsx  # Dual-pane code editor & chat console
+│   │   ├── ProblemCatalog.tsx             # Catalog, search, banners, calendar
+│   │   └── ProblemWorkspace.tsx           # Legacy problem component
+│   ├── profile/
+│   │   └── UserProfileView.tsx            # Full LeetCode profile page
+│   └── shell/
+│       ├── AppShell.tsx               # Wrapper with global modals
+│       ├── TopBar.tsx                 # Official LeetCode navigation header
+│       └── UsernamePromptModal.tsx    # Initial username setup modal
+├── hooks/
+│   └── useRealtime.ts                 # Real-time WebSocket hook with heartbeat
+├── lib/
+│   ├── crypto.ts                      # Client-side AES-256-GCM & PBKDF2
+│   ├── problemsData.ts                # LeetCode problem data, testcases, stubs
+│   └── utils.ts                       # UI utility functions
+├── server/
+│   └── roomManager.ts                 # Atomic 2-person room coordination
+└── stores/
+    ├── roomStore.ts                   # Zustand store for room & chat state
+    └── userProfileStore.ts            # Zustand store for user profile metrics
+```
 
-### 1. Installation
+---
+
+## ⚙️ Running & Verification
+
 ```bash
-cd Code
+# Install dependencies
 npm install
-```
 
-### 2. Environment Configuration
-Copy the template to `.env.local`:
-```bash
-cp .env.example .env.local
-```
-
-Key environment variables:
-- `PORT`: Server port (default: `3001`)
-- `ROOM_TTL_SECONDS`: Maximum session duration in seconds (default: `1800` / 30 mins)
-- `MAX_ROOM_PARTICIPANTS`: Strict limit per room (`2`)
-- `MAX_MESSAGE_BYTES`: Max plaintext/ciphertext payload (`65536` / 64KB)
-- `MAX_ATTACHMENT_BYTES`: Max image attachment size (`5242880` / 5MB)
-
-### 3. Run Development Server
-```bash
-npm run dev
-```
-Open [http://localhost:3001](http://localhost:3001) in your browser.
-
-### 4. Run Test Suite
-```bash
+# Run unit tests
 npm test
-```
-Executes all unit and integration tests covering:
-- Cryptographic key derivation, AES-256-GCM encryption/decryption, fingerprint calculation, and authentication tag mismatch rejection.
-- Atomic room creation, 2-participant capacity enforcement, and rejection of 3rd participant.
-- Zod schema validation for event envelopes and payloads.
 
-### 5. Production Build & Start
-```bash
+# Build production bundle
 npm run build
-npm start
+
+# Start production server
+node server.js
 ```
 
----
-
-## Two-Person Pairing Workflow
-
-1. **Participant 1 (Room Creator):**
-   - Clicks **Pair Session** or **Initialize / Pair Session**.
-   - Selects **Create New Room**.
-   - Chooses a display alias and a Secret Passphrase (or generates a secure random one).
-   - Receives an unguessable Room Code (e.g., `TITAN-8921-XQ`).
-   - Shares the Room Code and Passphrase with Participant 2 out-of-band.
-2. **Participant 2 (Joiner):**
-   - Opens the application in a separate browser context or device.
-   - Clicks **Pair Session** -> **Join Existing Room**.
-   - Enters the Room Code, Secret Passphrase, and their alias.
-   - The gateway validates credentials and atomically assigns Slot 2.
-3. **Problem 7 Unlocks:**
-   - Both participants are redirected to **Problem 7 (Private Communication)**.
-   - The top bar displays `Connected (2/2)` with a pulsing green indicator.
-   - Both participants can verify their 16-digit Safety Fingerprint under the Shield icon.
-   - Messages sent by Participant 1 arrive for Participant 2 as numbered test cases.
-   - Either participant can reply directly to any test case.
-   - Either participant can switch to **Contest** to share encrypted images.
+Application runs on **Port 3001** (`http://localhost:3001`).
 
 ---
 
-## Security & Privacy Notice
-
-- **Ephemeral Memory Only:** Chat history is never stored in any database. Closing the browser or allowing the 30-minute room TTL to expire purges all transient state.
-- **Client-Side Encryption:** The server relays only AES-256-GCM ciphertext. It does not have access to your private key or plaintext.
-- **Honest Limitations:** "Leave no trace" means zero server-side retention. However, TITAN cannot prevent physical actions on recipient devices (e.g. screenshots, photographs, external downloads). Always chat with trusted peers.
-
+## 🌐 Online Reference
+- **Production URL:** [Problems - LeetCode](https://leetcodecom.vercel.app/)

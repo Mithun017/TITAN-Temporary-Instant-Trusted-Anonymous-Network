@@ -192,3 +192,63 @@ export function getSessionByCode(roomCode: string): ActiveSession | undefined {
   return rooms.get(roomId);
 }
 
+export function getDirectPassphrase(roomCode: string): string {
+  return `direct-session-${roomCode.trim().toUpperCase()}-key`;
+}
+
+export function createOrJoinDirectRoom(
+  roomCode?: string,
+  alias?: string
+): {
+  success: boolean;
+  error?: string;
+  isCreator: boolean;
+  room?: Room;
+  participantId?: string;
+  slot?: 1 | 2;
+  passphrase?: string;
+} {
+  if (roomCode) {
+    const code = roomCode.trim().toUpperCase();
+    const roomId = codeIndex.get(code);
+    if (roomId) {
+      const session = rooms.get(roomId);
+      if (session && session.room.expiresAt > Date.now()) {
+        const passphrase = getDirectPassphrase(code);
+        if (session.room.participants.length < 2) {
+          const res = joinRoom(code, passphrase, alias || "Partner");
+          return {
+            success: res.success,
+            error: res.error,
+            isCreator: false,
+            room: res.room,
+            participantId: res.participantId,
+            slot: res.slot,
+            passphrase,
+          };
+        } else {
+          return {
+            success: false,
+            error: "This pair session is already full (maximum 2 participants).",
+            isCreator: false,
+          };
+        }
+      }
+    }
+  }
+
+  // Create new direct room with 2 hours TTL
+  const newCode = generateRoomCode();
+  const passphrase = getDirectPassphrase(newCode);
+  const { room, participantId } = createRoom(alias || "Host", passphrase, 7200);
+  return {
+    success: true,
+    isCreator: true,
+    room,
+    participantId,
+    slot: 1,
+    passphrase,
+  };
+}
+
+

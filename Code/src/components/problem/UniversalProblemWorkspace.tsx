@@ -9,6 +9,8 @@ import { formatTime } from "@/lib/utils";
 import { getProblem, ProblemData, TestCase } from "@/lib/problemsData";
 import { useUserProfileStore } from "@/stores/userProfileStore";
 import { UsernamePromptModal } from "@/components/shell/UsernamePromptModal";
+import { deriveKey } from "@/lib/crypto";
+import { Room, Participant } from "@/types";
 import {
   Play,
   CheckCircle2,
@@ -74,9 +76,98 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
 
   // Navigation & Tabs
   const [activeLeftTab, setActiveLeftTab] = useState<"description" | "editorial" | "solutions" | "submissions">("description");
-  const [consoleTab, setConsoleTab] = useState<"testcase" | "result">("result");
+  const [consoleTab, setConsoleTab] = useState<"testcase" | "result" | "chat">(isSeven ? "chat" : "result");
   const [selectedLanguage, setSelectedLanguage] = useState<"python3" | "typescript" | "javascript" | "cpp" | "java">("python3");
   const [activeCaseIdx, setActiveCaseIdx] = useState(0);
+
+  // Direct Link Chat State
+  const [directLinkCopied, setDirectLinkCopied] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (consoleTab === "chat") {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, consoleTab]);
+
+  // Direct Link auto-initialization (no room ID or passphrase prompt required)
+  useEffect(() => {
+    async function initDirectLinkSession() {
+      if (room && me) return;
+
+      try {
+        const searchParams = new URLSearchParams(window.location.search);
+        const urlRoomCode = searchParams.get("room") || searchParams.get("session");
+
+        const res = await fetch("/api/rooms/direct", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomCode: urlRoomCode || undefined,
+            alias: urlRoomCode ? "Guest" : (realName || "Host"),
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success && data.roomId && data.passphrase) {
+          const key = await deriveKey(data.passphrase, data.salt);
+
+          const currentRoom: Room = {
+            roomId: data.roomId,
+            roomCode: data.roomCode,
+            salt: data.salt,
+            createdAt: Date.now(),
+            expiresAt: data.expiresAt,
+            status: data.participants?.length > 1 ? "ACTIVE" : "WAITING_FOR_PARTNER",
+            participants: data.participants || [],
+            maxParticipants: 2,
+          };
+
+          const meParticipant: Participant = {
+            id: data.participantId,
+            alias: data.isCreator ? (realName || "Host") : "Guest",
+            slot: data.slot,
+            isConnected: true,
+            joinedAt: Date.now(),
+            lastActiveAt: Date.now(),
+          };
+
+          useRoomStore.getState().setRoom(currentRoom);
+          useRoomStore.getState().setMe(meParticipant);
+          useRoomStore.getState().setCryptoKey(key);
+
+          // Update URL with room parameter if not already present
+          if (!urlRoomCode && data.roomCode) {
+            const newUrl = `${window.location.pathname}?room=${encodeURIComponent(data.roomCode)}`;
+            window.history.replaceState({}, "", newUrl);
+          }
+        }
+      } catch (err) {
+        console.error("Direct link session error:", err);
+      }
+    }
+
+    initDirectLinkSession();
+  }, [room, me, realName]);
+
+  const copyDirectLink = () => {
+    const code = room?.roomCode;
+    const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
+    const shareUrl = `${origin}${window.location.pathname}${code ? `?room=${encodeURIComponent(code)}` : ""}`;
+    navigator.clipboard.writeText(shareUrl);
+    setDirectLinkCopied(true);
+    setTimeout(() => setDirectLinkCopied(false), 2500);
+  };
+
+  const handleSendChatMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!chatInput.trim()) return;
+    const msg = chatInput.trim();
+    setChatInput("");
+    await sendMessage(msg, "text");
+  };
 
   // Code editor state
   const [code, setCode] = useState(problem.starterCode.python3);
@@ -388,11 +479,12 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
           </div>
 
           <button
-            onClick={() => setIsJoinCreateOpen(true)}
-            className="p-1 rounded hover:bg-[#282828] text-[#8a8a8a] hover:text-white"
-            title={room ? `Session: ${room.roomCode}` : "Pair Programming"}
+            onClick={copyDirectLink}
+            className="flex items-center gap-1.5 p-1 px-2 rounded bg-[#282828] hover:bg-[#333333] text-zinc-300 hover:text-white transition-colors"
+            title={directLinkCopied ? "Link Copied!" : "Copy Direct Chat Invite Link (no ID or password needed)"}
           >
-            <UserPlus className="w-4 h-4" />
+            {directLinkCopied ? <Check className="w-3.5 h-3.5 text-[#2ebd59]" /> : <UserPlus className="w-3.5 h-3.5 text-[#3880ff]" />}
+            <span className="text-[11px] font-sans font-medium">{directLinkCopied ? "Copied" : "Share Link"}</span>
           </button>
 
           <Link
@@ -730,7 +822,7 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
           {/* Lower: Console Drawer (Testcase / Test Result) (Height 45%) */}
           <div className="h-[45%] flex flex-col bg-[#1a1a1a] overflow-hidden">
             {/* Console Tab Row */}
-            <div className="h-9 bg-[#222222] border-b border-[#282828] px-3 flex items-center justify-between text-xs shrink-0">
+            <div className="h-9 bg-[#222222] border-b border-[#282828] px-3 flex items-center justify-between text-xs shrink-0 select-none">
               <div className="flex items-center gap-4">
                 <button
                   onClick={() => setConsoleTab("testcase")}
@@ -756,18 +848,163 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
                   <span>Test Result</span>
                   {hasRun && <span className="w-1.5 h-1.5 rounded-full bg-[#2ebd59]" />}
                 </button>
+
+                <button
+                  onClick={() => setConsoleTab("chat")}
+                  className={`py-2 font-semibold transition-colors flex items-center gap-1.5 relative ${
+                    consoleTab === "chat"
+                      ? "text-white after:content-[''] after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-[#ffa116]"
+                      : "text-[#8a8a8a] hover:text-white"
+                  }`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-[#ffa116]" />
+                  <span>Chat</span>
+                  {messages.length > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-[#ffa116] text-black font-bold">
+                      {messages.length}
+                    </span>
+                  )}
+                  {partner && <span className="w-1.5 h-1.5 rounded-full bg-[#2ebd59]" />}
+                </button>
               </div>
 
-              {partnerIsTyping && (
-                <span className="text-[11px] text-[#ffa116] animate-pulse font-mono">
-                  Running test...
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                {partnerIsTyping && (
+                  <span className="text-[11px] text-[#ffa116] animate-pulse font-mono">
+                    Running test...
+                  </span>
+                )}
+
+                <button
+                  onClick={copyDirectLink}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#2a2a2a] hover:bg-[#343434] text-white text-[11px] font-sans font-medium border border-[#3d3d3d] transition-colors"
+                  title="Share link to chat directly without ID or passphrase"
+                >
+                  {directLinkCopied ? (
+                    <>
+                      <Check className="w-3 h-3 text-[#2ebd59]" />
+                      <span className="text-[#2ebd59]">Copied Link!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-3 h-3 text-[#ffa116]" />
+                      <span>{partner ? "Invite Partner" : "Copy Chat Link"}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Console Body */}
-            <div className="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-3">
-              {consoleTab === "result" ? (
+            <div className="flex-1 p-4 overflow-y-auto text-xs space-y-3">
+              {consoleTab === "chat" ? (
+                /* Interactive Direct Chat Interface */
+                <div className="h-full flex flex-col justify-between font-sans text-xs">
+                  {/* Chat Presence & Controls Sub-bar */}
+                  <div className="pb-2.5 mb-2 border-b border-[#2a2a2a] flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${partner ? "bg-[#2ebd59]" : "bg-[#ffa116] animate-pulse"}`} />
+                      <span className="text-zinc-300 font-medium">
+                        {partner ? `Connected with ${partner.alias}` : "Waiting for partner (Share link to chat directly)"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={copyDirectLink}
+                        className="text-[11px] text-[#ffa116] hover:underline flex items-center gap-1"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>{directLinkCopied ? "Copied" : "Copy Link"}</span>
+                      </button>
+                      <span className="text-zinc-600">|</span>
+                      <button
+                        onClick={() => setConsoleTab("result")}
+                        className="text-[11px] text-zinc-400 hover:text-white flex items-center gap-1 transition-colors"
+                        title="Quick Disguise"
+                      >
+                        <span>Disguise as Error</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Messages Stream */}
+                  <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 min-h-[120px]">
+                    {messages.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center p-4 text-zinc-500">
+                        <MessageSquare className="w-8 h-8 mb-2 text-zinc-600" />
+                        <div className="text-xs font-semibold text-zinc-400">Direct Link Peer Chat Active</div>
+                        <div className="text-[11px] text-zinc-500 mt-1 max-w-xs leading-relaxed">
+                          Anyone who has your link connects directly without entering any ID or passphrase. Encrypted end-to-end via client-side AES-256-GCM.
+                        </div>
+                        <button
+                          onClick={copyDirectLink}
+                          className="mt-3 px-3 py-1.5 bg-[#ffa116]/10 hover:bg-[#ffa116]/20 text-[#ffa116] border border-[#ffa116]/30 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                          <span>{directLinkCopied ? "Link Copied!" : "Copy Direct Chat Link to Invite"}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      messages.map((m) => {
+                        const isMe = m.senderId === me?.id;
+                        return (
+                          <div
+                            key={m.id}
+                            className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
+                          >
+                            <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 mb-0.5 px-1">
+                              <span className="font-medium text-zinc-300">{isMe ? "You" : partner?.alias || "Partner"}</span>
+                              <span>•</span>
+                              <span>{formatTime(m.timestamp)}</span>
+                            </div>
+                            <div
+                              className={`max-w-[85%] rounded-xl px-3.5 py-2 text-xs leading-relaxed break-words font-mono select-text ${
+                                isMe
+                                  ? "bg-[#1e3a29] text-[#eff1f3] border border-[#2ebd59]/30 rounded-tr-none shadow"
+                                  : "bg-[#252830] text-[#eff1f3] border border-[#3b82f6]/30 rounded-tl-none shadow"
+                              }`}
+                            >
+                              {m.content}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Partner Typing Indicator */}
+                  {partnerIsTyping && (
+                    <div className="text-[11px] text-[#ffa116] italic py-1 flex items-center gap-1.5 animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#ffa116]" />
+                      <span>{partner?.alias || "Partner"} is typing...</span>
+                    </div>
+                  )}
+
+                  {/* Chat Input Box */}
+                  <form onSubmit={handleSendChatMessage} className="pt-2 flex items-center gap-2 border-t border-[#2e2e2e] mt-2">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => {
+                        setChatInput(e.target.value);
+                        sendTyping();
+                      }}
+                      placeholder="Type a message... (Press Enter to send)"
+                      className="flex-1 bg-[#242424] border border-[#333333] focus:border-[#ffa116] rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none font-mono"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!chatInput.trim()}
+                      className="px-4 py-2 bg-[#ffa116] hover:bg-[#ffb800] text-black font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-colors disabled:opacity-40"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Send</span>
+                    </button>
+                  </form>
+                </div>
+              ) : consoleTab === "result" ? (
                 runResult.status === "Runtime Error" ? (
                   /* Runtime Error View (Exact match to uploaded LeetCode screenshot) */
                   <div className="space-y-3">
