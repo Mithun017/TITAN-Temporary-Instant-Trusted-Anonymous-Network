@@ -76,9 +76,129 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
 
   // Navigation & Tabs
   const [activeLeftTab, setActiveLeftTab] = useState<"description" | "editorial" | "solutions" | "submissions">("description");
-  const [consoleTab, setConsoleTab] = useState<"testcase" | "result">("result");
+  const [consoleTab, setConsoleTab] = useState<"testcase" | "result" | "chat">(isSeven ? "chat" : "result");
   const [selectedLanguage, setSelectedLanguage] = useState<"python3" | "typescript" | "javascript" | "cpp" | "java">("python3");
   const [activeCaseIdx, setActiveCaseIdx] = useState(0);
+
+  // Chat state
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (consoleTab === "chat") {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, consoleTab]);
+
+  // Multi-tab instant sync via BroadcastChannel
+  useEffect(() => {
+    if (typeof window === "undefined" || !("BroadcastChannel" in window)) return;
+    const bc = new BroadcastChannel(`titan-channel-problem-${problem.id}`);
+    bc.onmessage = (event) => {
+      const msg = event.data;
+      if (msg && msg.content && msg.senderId !== me?.id) {
+        const existing = useRoomStore.getState().messages.some((x) => x.id === msg.id);
+        if (!existing) {
+          useRoomStore.getState().addMessage(msg);
+        }
+      }
+    };
+    return () => bc.close();
+  }, [problem.id, me?.id]);
+
+  // Polling fallback for Vercel deployment
+  useEffect(() => {
+    const channelId = `problem-${problem.id}`;
+    let lastTime = 0;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/channel/messages?channelId=${channelId}&since=${lastTime}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.messages && data.messages.length > 0) {
+            lastTime = data.serverTime || Date.now();
+            for (const m of data.messages) {
+              if (m.senderId !== me?.id) {
+                const existing = useRoomStore.getState().messages.some((x) => x.id === m.id);
+                if (!existing) {
+                  useRoomStore.getState().addMessage({
+                    id: m.id,
+                    roomId: channelId,
+                    senderId: m.senderId,
+                    senderSlot: 2,
+                    senderAlias: m.senderAlias,
+                    messageType: m.messageType || "text",
+                    content: m.content,
+                    sequenceNumber: 1,
+                    timestamp: m.timestamp,
+                    status: "delivered",
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch {}
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [problem.id, me?.id]);
+
+  // Send Chat message
+  const handleSendChat = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const text = chatInput.trim();
+    if (!text) return;
+
+    setChatInput("");
+
+    // 1. Send via WebSocket
+    try {
+      await sendMessage(text, "text");
+    } catch (err) {
+      console.error("Realtime send error:", err);
+    }
+
+    // 2. Broadcast to other open tabs in this browser instantly
+    try {
+      if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+        const bc = new BroadcastChannel(`titan-channel-problem-${problem.id}`);
+        bc.postMessage({
+          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          roomId: `problem-${problem.id}`,
+          senderId: me?.id || "me",
+          senderSlot: 1,
+          senderAlias: username || realName || "Mithun1706",
+          messageType: "text",
+          content: text,
+          timestamp: Date.now(),
+          status: "delivered",
+        });
+        bc.close();
+      }
+    } catch {}
+
+    // 3. Relay to serverless HTTP API for cross-device Vercel communication
+    try {
+      fetch("/api/channel/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelId: `problem-${problem.id}`,
+          message: {
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            senderId: me?.id || "me",
+            senderAlias: username || realName || "Mithun1706",
+            content: text,
+            messageType: "text",
+            timestamp: Date.now(),
+          },
+        }),
+      }).catch(() => {});
+    } catch {}
+  };
 
   // Auto-connect to open problem channel (no room IDs, no query params, pure main link)
   useEffect(() => {
@@ -804,6 +924,23 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
                   <span>Test Result</span>
                   <span className="w-1.5 h-1.5 rounded-full bg-[#2ebd59]" />
                 </button>
+
+                <button
+                  onClick={() => setConsoleTab("chat")}
+                  className={`py-2 font-semibold transition-colors flex items-center gap-1.5 relative ${
+                    consoleTab === "chat"
+                      ? "text-white after:content-[''] after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-[#ffa116]"
+                      : "text-[#8a8a8a] hover:text-white"
+                  }`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-[#ffa116]" />
+                  <span>Chat</span>
+                  {messages.length > 0 && (
+                    <span className="px-1.5 py-0.2 bg-[#ffa116] text-black text-[10px] font-bold rounded-full">
+                      {messages.length}
+                    </span>
+                  )}
+                </button>
               </div>
 
               {partnerIsTyping && (
@@ -815,7 +952,73 @@ export function UniversalProblemWorkspace({ problemId = "1267" }: { problemId?: 
 
             {/* Console Body */}
             <div className="flex-1 p-4 overflow-y-auto text-xs space-y-3 font-mono">
-              {consoleTab === "result" ? (
+              {consoleTab === "chat" ? (
+                /* Live Peer Chat Stream */
+                <div className="flex flex-col h-full space-y-2">
+                  {/* Messages Scroll Area */}
+                  <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 min-h-[140px]">
+                    {messages.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center text-[#8a8a8a] space-y-2 py-8">
+                        <MessageSquare className="w-7 h-7 text-[#555555]" />
+                        <div className="text-xs font-semibold text-white">Live Problem Discussion</div>
+                        <div className="text-[11px] text-[#8a8a8a] max-w-sm">
+                          Send a message below to chat in real-time with anyone currently on this problem.
+                        </div>
+                      </div>
+                    ) : (
+                      messages.map((m) => {
+                        const isMe = m.senderId === me?.id || m.senderAlias === username;
+                        return (
+                          <div
+                            key={m.id}
+                            className={`flex flex-col ${isMe ? "items-end" : "items-start"} space-y-1`}
+                          >
+                            <div className="flex items-center gap-1.5 text-[10px] text-[#8a8a8a]">
+                              <span className={isMe ? "text-[#ffa116] font-semibold" : "text-[#3a86ff] font-semibold"}>
+                                {isMe ? `${username || "You"} (You)` : m.senderAlias || "Peer"}
+                              </span>
+                              <span>•</span>
+                              <span>{formatTime(m.timestamp)}</span>
+                            </div>
+                            <div
+                              className={`px-3 py-2 rounded-lg text-xs leading-relaxed select-text whitespace-pre-wrap max-w-[85%] break-words font-mono ${
+                                isMe
+                                  ? "bg-[#2d2518] border border-[#ffa116]/30 text-white"
+                                  : "bg-[#242424] border border-[#333333] text-[#eff1f3]"
+                              }`}
+                            >
+                              {m.content}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Chat Input Bar */}
+                  <form onSubmit={handleSendChat} className="pt-2 flex items-center gap-2 border-t border-[#2e2e2e]">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => {
+                        setChatInput(e.target.value);
+                        sendTyping();
+                      }}
+                      placeholder="Type a message... (Press Enter to send)"
+                      className="flex-1 bg-[#242424] border border-[#333333] focus:border-[#ffa116] rounded px-3 py-2 text-xs text-white placeholder-[#8a8a8a] focus:outline-none font-mono"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!chatInput.trim()}
+                      className="px-4 py-2 bg-[#ffa116] hover:bg-[#ffb800] text-black font-semibold rounded text-xs flex items-center gap-1.5 transition-colors disabled:opacity-40"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Send</span>
+                    </button>
+                  </form>
+                </div>
+              ) : consoleTab === "result" ? (
                 runResult.status === "Runtime Error" ? (
                   /* Runtime Error View (Exact match to uploaded LeetCode screenshot) */
                   <div className="space-y-3">
